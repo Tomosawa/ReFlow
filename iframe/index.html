@@ -1,0 +1,1042 @@
+<!doctype html>
+<html lang="zh-Hans">
+	<head>
+		<title>ReFlow 智能位号</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<style>
+			* { margin: 0; padding: 0; box-sizing: border-box; }
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+				font-size: 13px; color: #1d1d1f; background: #f5f5f7;
+				padding: 14px; min-width: 380px;
+			}
+			.header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+			.header h3 { font-size: 15px; font-weight: 600; color: #1d1d1f; }
+			.section {
+				background: #fff; border-radius: 8px; padding: 12px;
+				margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+			}
+			.section.disabled { opacity: 0.4; pointer-events: none; }
+			.section-label {
+				font-size: 11px; font-weight: 600; color: #86868b;
+				text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+			}
+			.radio-group { display: flex; gap: 16px; }
+			.radio-group.vertical { flex-direction: column; gap: 6px; }
+			.radio-group label {
+				display: flex; align-items: center; gap: 6px;
+				cursor: pointer; font-size: 13px; color: #1d1d1f;
+			}
+			.radio-group input[type="radio"] {
+				accent-color: #0071e3; cursor: pointer;
+			}
+			.lock-input, .num-input {
+				padding: 6px 10px; border: 1px solid #d2d2d7;
+				border-radius: 6px; font-size: 13px; outline: none; transition: border-color 0.15s;
+			}
+			.lock-input:focus, .num-input:focus { border-color: #0071e3; }
+			.num-input { width: 70px; text-align: center; }
+			.hint { font-size: 11px; color: #86868b; margin-top: 6px; }
+			.btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+			button {
+				padding: 7px 12px; border: none; border-radius: 6px;
+				font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s ease;
+			}
+			button:disabled { background: #b0b0b6; cursor: not-allowed; color: #fff; }
+			#startBtn { background: #0071e3; color: #fff; flex: 1; }
+			#startBtn:hover:not(:disabled) { background: #0077ed; }
+			#undoBtn { background: #ff9f0a; color: #fff; }
+			#undoBtn:hover:not(:disabled) { background: #ffb340; }
+			#closeBtn { background: #e8e8ed; color: #1d1d1f; }
+			#closeBtn:hover { background: #dcdce0; }
+			.progress-section, .log-section { display: none; }
+			.progress-section.visible, .log-section.visible { display: block; }
+			.status-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+			.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+			.status-dot.idle { background: #b0b0b6; }
+			.status-dot.running { background: #ff9f0a; animation: pulse 1s ease-in-out infinite; }
+			.status-dot.done { background: #30d158; }
+			.status-dot.error { background: #ff453a; }
+			@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+			.status-text { font-size: 13px; color: #1d1d1f; }
+			.progress-track { width: 100%; height: 4px; background: #e8e8ed; border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
+			.progress-fill { height: 100%; background: #0071e3; border-radius: 2px; transition: width 0.3s ease; width: 0%; }
+			.progress-fill.done { background: #30d158; }
+			.progress-fill.error { background: #ff453a; }
+			.stats { display: flex; gap: 16px; font-size: 12px; color: #86868b; }
+			.log {
+				max-height: 200px; overflow-y: auto;
+				font-family: "SF Mono","Menlo","Monaco","Courier New",monospace;
+				font-size: 11px; line-height: 1.6; color: #424245;
+			}
+			.log-entry { padding: 1px 0; border-bottom: 1px solid #f5f5f7; }
+			.log-entry .time { color: #86868b; margin-right: 6px; }
+			.log-entry.info { color: #424245; }
+			.log-entry.success { color: #248a3d; }
+			.log-entry.warning { color: #c93400; }
+			.log-entry.error { color: #d70015; }
+			.log-entry.diff { color: #5856d6; }
+		</style>
+	</head>
+	<body>
+		<div class="header"><h3>ReFlow 智能位号</h3></div>
+
+		<div class="section">
+			<div class="section-label" id="lblScope"></div>
+			<div class="radio-group">
+				<label><input type="radio" name="scope" value="all" checked /> <span id="lblAllPages"></span></label>
+				<label><input type="radio" name="scope" value="current" /> <span id="lblCurrentPage"></span></label>
+			</div>
+		</div>
+
+		<div class="section">
+			<div class="section-label" id="lblNumberingMode"></div>
+			<div class="radio-group">
+				<label><input type="radio" name="numbering" value="continuous" checked /> <span id="lblContinuous"></span></label>
+				<label><input type="radio" name="numbering" value="perpage" /> <span id="lblPerpage"></span></label>
+				<label><input type="radio" name="numbering" value="perblock" /> <span id="lblPerblock"></span></label>
+			</div>
+			<div class="hint" id="numberingHint"></div>
+		</div>
+
+		<div class="section">
+			<div class="section-label" id="lblStartNum"></div>
+			<div class="radio-group">
+				<label><input type="radio" name="startnum" value="auto" checked /> <span id="lblAuto"></span></label>
+				<label><input type="radio" name="startnum" value="custom" /> <span id="lblCustom"></span>
+					<input type="number" id="customStartNum" class="num-input" min="1" value="1" disabled /></label>
+			</div>
+		</div>
+
+		<div class="section" id="existingHandlingSection">
+			<div class="section-label" id="lblExistingHandling"></div>
+			<div class="radio-group">
+				<label><input type="radio" name="existing" value="skip" checked /> <span id="lblSkip"></span></label>
+				<label><input type="radio" name="existing" value="overwrite" /> <span id="lblOverwrite"></span></label>
+				<label><input type="radio" name="existing" value="clear" /> <span id="lblClearAll"></span></label>
+			</div>
+		</div>
+
+		<div class="section">
+			<div class="section-label" id="lblLock"></div>
+			<div style="display:flex;gap:6px;align-items:center;">
+				<input type="text" id="lockInput" class="lock-input" placeholder="U1,R3,C5" style="flex:1" />
+				<button id="fromSelectionBtn" onclick="fillFromSelection()" style="background:#5856d6;color:#fff;padding:6px 10px;font-size:11px;white-space:nowrap;"></button>
+			</div>
+			<div class="hint" id="lblLockHint"></div>
+		</div>
+
+		<div class="section btn-row">
+			<button id="startBtn" onclick="startReannotate()"></button>
+			<button id="undoBtn" onclick="performUndo()" disabled></button>
+			<button id="closeBtn" onclick="closeWindow()"></button>
+		</div>
+
+		<div id="progressSection" class="section progress-section">
+			<div class="status-bar">
+				<span id="statusDot" class="status-dot idle"></span>
+				<span id="statusText" class="status-text"></span>
+			</div>
+			<div class="progress-track">
+				<div id="progressFill" class="progress-fill"></div>
+			</div>
+			<div class="stats">
+				<span id="statPages"></span>
+				<span id="statComponents"></span>
+				<span id="statClusters"></span>
+			</div>
+		</div>
+
+		<div id="logSection" class="section log-section">
+			<div class="section-label" id="lblLog"></div>
+			<div id="log" class="log"></div>
+		</div>
+
+		<script>
+			var isRunning = false;
+
+			// --- i18n shortcut ---
+			function t(key, p1, p2, p3) {
+				return eda.sys_I18n.text(key, undefined, undefined, p1, p2, p3);
+			}
+
+			// --- Init static UI labels ---
+			(function() {
+				document.getElementById('lblScope').textContent = t('Scope');
+				document.getElementById('lblCurrentPage').textContent = t('Current Page');
+				document.getElementById('lblAllPages').textContent = t('All Pages');
+				document.getElementById('lblNumberingMode').textContent = t('Numbering Mode');
+				document.getElementById('lblContinuous').textContent = t('Continuous Numbering');
+				document.getElementById('lblPerpage').textContent = t('Per-page Numbering');
+				document.getElementById('lblPerblock').textContent = t('Per-block Numbering');
+				updateNumberingHint();
+				document.getElementById('lblStartNum').textContent = t('Starting Number');
+				document.getElementById('lblAuto').textContent = t('Auto');
+				document.getElementById('lblCustom').textContent = t('Custom');
+				document.getElementById('lblExistingHandling').textContent = t('Existing Designators');
+				document.getElementById('lblClearAll').textContent = t('Clear All');
+				document.getElementById('lblOverwrite').textContent = t('Overwrite Existing');
+				document.getElementById('lblSkip').textContent = t('Skip Existing');
+				document.getElementById('lblLock').textContent = t('Lock Components');
+				document.getElementById('lblLockHint').textContent = t('Locked components will keep their designators, others skip around them');
+				document.getElementById('fromSelectionBtn').textContent = t('From Selection');
+				document.getElementById('startBtn').textContent = t('Start');
+				document.getElementById('undoBtn').textContent = t('Undo');
+				document.getElementById('closeBtn').textContent = t('Close');
+				document.getElementById('statusText').textContent = t('Ready');
+				document.getElementById('lblLog').textContent = t('Log');
+				document.getElementById('existingHandlingSection').classList.add('disabled');
+				updateStats('-', '-', '-');
+			})();
+
+			// --- UI event listeners ---
+			(function() {
+				// Scope change toggles existing handling section
+				document.querySelectorAll('input[name="scope"]').forEach(function(radio) {
+					radio.addEventListener('change', function() {
+						var section = document.getElementById('existingHandlingSection');
+						if (this.value === 'all') {
+							section.classList.add('disabled');
+						} else {
+							section.classList.remove('disabled');
+						}
+					});
+				});
+
+				// Numbering mode change updates hint
+				document.querySelectorAll('input[name="numbering"]').forEach(function(radio) {
+					radio.addEventListener('change', updateNumberingHint);
+				});
+
+				// Starting number mode toggles custom input
+				document.querySelectorAll('input[name="startnum"]').forEach(function(radio) {
+					radio.addEventListener('change', function() {
+						var input = document.getElementById('customStartNum');
+						input.disabled = (this.value === 'auto');
+						if (this.value === 'custom') { input.focus(); input.select(); }
+					});
+				});
+			})();
+
+			// --- Init: check undo availability ---
+			(async function() {
+				try {
+					var data = await eda.sys_Storage.getExtensionUserConfig('reflow-undo');
+					if (data) document.getElementById('undoBtn').disabled = false;
+				} catch(e) {}
+			})();
+
+			// --- UI helpers ---
+			function log(message, type) {
+				type = type || 'info';
+				var logEl = document.getElementById('log');
+				var logSection = document.getElementById('logSection');
+				logSection.classList.add('visible');
+				var entry = document.createElement('div');
+				entry.className = 'log-entry ' + type;
+				var now = new Date();
+				var timeStr = [String(now.getHours()).padStart(2,'0'), String(now.getMinutes()).padStart(2,'0'), String(now.getSeconds()).padStart(2,'0')].join(':');
+				entry.innerHTML = '<span class="time">' + timeStr + '</span>' + message;
+				logEl.appendChild(entry);
+				logEl.scrollTop = logEl.scrollHeight;
+			}
+
+			function setStatus(text, state) {
+				document.getElementById('statusText').textContent = text;
+				document.getElementById('statusDot').className = 'status-dot ' + state;
+			}
+			function setProgress(current, total) {
+				var pct = total > 0 ? Math.round((current/total)*100) : 0;
+				var fill = document.getElementById('progressFill');
+				fill.style.width = pct + '%'; fill.className = 'progress-fill';
+			}
+			function setProgressDone() {
+				var fill = document.getElementById('progressFill');
+				fill.style.width = '100%'; fill.className = 'progress-fill done';
+			}
+			function setProgressError() {
+				var fill = document.getElementById('progressFill');
+				fill.className = 'progress-fill error';
+			}
+			function updateStats(pages, components, clusters) {
+				document.getElementById('statPages').textContent = t('Pages: ${1}', pages);
+				document.getElementById('statComponents').textContent = t('Components: ${1}', components);
+				document.getElementById('statClusters').textContent = t('Clusters: ${1}', clusters);
+			}
+			function closeWindow() { eda.sys_IFrame.closeIFrame('reannotate-iframe'); }
+
+			function setButtonsDisabled(disabled) {
+				document.getElementById('startBtn').disabled = disabled;
+			}
+
+			// --- Parse locked designators ---
+			function parseLockedDesignators(inputText) {
+				if (!inputText || !inputText.trim()) return new Set();
+				var parts = inputText.split(',');
+				var result = new Set();
+				for (var i = 0; i < parts.length; i++) {
+					var d = parts[i].trim().toUpperCase();
+					if (d) result.add(d);
+				}
+				return result;
+			}
+
+			// --- Fill lock input from selection ---
+			async function fillFromSelection() {
+				try {
+					var selected = await eda.sch_SelectControl.getAllSelectedPrimitives();
+					if (!selected || selected.length === 0) {
+						log(t('No components selected'), 'warning');
+						return;
+					}
+					var designators = [];
+					for (var i = 0; i < selected.length; i++) {
+						var prim = selected[i];
+						if (prim.getState_PrimitiveType() === 'Component') {
+							var d = prim.getState_Designator();
+							if (d) designators.push(d);
+						}
+					}
+					if (designators.length === 0) {
+						log(t('No components selected'), 'warning');
+						return;
+					}
+					var existing = document.getElementById('lockInput').value.trim();
+					var existingList = existing ? existing.split(',') : [];
+					var combined = new Set();
+					for (var i = 0; i < existingList.length; i++) {
+						var v = existingList[i].trim().toUpperCase();
+						if (v) combined.add(v);
+					}
+					for (var i = 0; i < designators.length; i++) {
+						combined.add(designators[i].toUpperCase());
+					}
+					document.getElementById('lockInput').value = Array.from(combined).join(',');
+					log(t('${1} components added from selection', designators.length), 'info');
+				} catch (err) {
+					log(t('Failed to get selection: ${1}', err.message||err), 'warning');
+				}
+			}
+
+			// --- Read UI state ---
+			function getScope() {
+				var el = document.querySelector('input[name="scope"]:checked');
+				return el ? el.value : 'current';
+			}
+			function getNumberingMode() {
+				var el = document.querySelector('input[name="numbering"]:checked');
+				return el ? el.value : 'continuous';
+			}
+			function updateNumberingHint() {
+				var mode = getNumberingMode();
+				var hintEl = document.getElementById('numberingHint');
+				if (mode === 'continuous') hintEl.textContent = t('Continuous Numbering Hint');
+				else if (mode === 'perpage') hintEl.textContent = t('Per-page Numbering Hint');
+				else hintEl.textContent = t('Per-block Numbering Hint');
+			}
+			function getStartingNumberMode() {
+				var el = document.querySelector('input[name="startnum"]:checked');
+				return el ? el.value : 'auto';
+			}
+			function getCustomStartNumber() {
+				var val = parseInt(document.getElementById('customStartNum').value, 10);
+				return isNaN(val) || val < 1 ? 1 : val;
+			}
+			function getExistingHandling() {
+				var el = document.querySelector('input[name="existing"]:checked');
+				return el ? el.value : 'clear';
+			}
+			function getLockedDesignators() {
+				return parseLockedDesignators(document.getElementById('lockInput').value);
+			}
+
+			// --- Page list construction ---
+			async function buildPageList(scope) {
+				var currentDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+				if (!currentDoc || currentDoc.documentType !== 1) return null;
+
+				var pages, skipOpenForFirst = false;
+				if (scope === 'current') {
+					pages = [{ uuid: currentDoc.uuid, name: t('Current Page') }];
+					skipOpenForFirst = true;
+				} else {
+					var allPages = await eda.dmt_Schematic.getCurrentSchematicAllSchematicPagesInfo();
+						if (!allPages || allPages.length === 0) return null;
+						allPages.sort(function(a,b) { return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+						pages = allPages;
+				}
+				return { pages: pages, originalTabId: currentDoc.tabId, skipOpenForFirst: skipOpenForFirst };
+			}
+
+			// --- Scan other pages for designator info ---
+			async function scanOtherPages(currentPageUuid) {
+				var result = {
+					maxByPrefix: {},
+					otherUsedSet: new Set(),
+					conflictDetails: []
+				};
+
+				var allPages = await eda.dmt_Schematic.getCurrentSchematicAllSchematicPagesInfo();
+				if (!allPages || allPages.length === 0) return result;
+
+				var currentDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+				var originalTabId = currentDoc ? currentDoc.tabId : null;
+				var otherPages = allPages.filter(function(p) { return p.uuid !== currentPageUuid; });
+
+				for (var pi = 0; pi < otherPages.length; pi++) {
+					var page = otherPages[pi];
+					var tabId = await eda.dmt_EditorControl.openDocument(page.uuid);
+					if (!tabId) continue;
+
+					var components = await eda.sch_PrimitiveComponent.getAll('part', false);
+					if (!components) continue;
+
+					for (var j = 0; j < components.length; j++) {
+						var comp = components[j];
+						var d = comp.getState_Designator();
+						if (!d) continue;
+						var prefix = getDesignatorPrefix(d);
+						if (!prefix) continue;
+
+						var numStr = d.substring(prefix.length);
+						var num = parseInt(numStr, 10);
+						if (!isNaN(num)) {
+							if (!(prefix in result.maxByPrefix) || num > result.maxByPrefix[prefix]) {
+								result.maxByPrefix[prefix] = num;
+							}
+						}
+
+						result.otherUsedSet.add(d.toUpperCase());
+						result.conflictDetails.push({
+							designator: d.toUpperCase(),
+							primitiveId: comp.getState_PrimitiveId(),
+							pageUuid: page.uuid,
+							pageName: page.name || ('P' + (pi + 1))
+						});
+					}
+				}
+
+				if (originalTabId) {
+					await eda.dmt_EditorControl.activateDocument(originalTabId);
+				}
+
+				return result;
+			}
+
+			// --- Handle overwrite conflicts on other pages ---
+			async function handleOverwriteConflicts(changes, scanResult, undoPages) {
+				var assignedDesignators = new Set();
+				for (var i = 0; i < changes.length; i++) {
+					if (!changes[i].locked && changes[i].oldDesignator !== changes[i].newDesignator) {
+						assignedDesignators.add(changes[i].newDesignator.toUpperCase());
+					}
+				}
+
+				var conflicts = [];
+				for (var i = 0; i < scanResult.conflictDetails.length; i++) {
+					if (assignedDesignators.has(scanResult.conflictDetails[i].designator)) {
+						conflicts.push(scanResult.conflictDetails[i]);
+					}
+				}
+
+				if (conflicts.length === 0) {
+					log(t('No designator conflicts with other pages'), 'info');
+					return;
+				}
+
+				log(t('${1} designator conflicts found on other pages', conflicts.length), 'warning');
+
+				var byPage = {};
+				for (var i = 0; i < conflicts.length; i++) {
+					var uuid = conflicts[i].pageUuid;
+					if (!byPage[uuid]) byPage[uuid] = { name: conflicts[i].pageName, items: [] };
+					byPage[uuid].items.push(conflicts[i]);
+				}
+
+				var currentDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+				var originalTabId = currentDoc ? currentDoc.tabId : null;
+
+				var pageUuids = Object.keys(byPage);
+				for (var pi = 0; pi < pageUuids.length; pi++) {
+					var pageUuid = pageUuids[pi];
+					var pageData = byPage[pageUuid];
+
+					var tabId = await eda.dmt_EditorControl.openDocument(pageUuid);
+					if (!tabId) { log(t('Cannot open page: ${1}', pageData.name), 'warning'); continue; }
+
+					var undoMappings = {};
+					for (var i = 0; i < pageData.items.length; i++) {
+						var item = pageData.items[i];
+						var prefix = getDesignatorPrefix(item.designator);
+						undoMappings[item.primitiveId] = item.designator;
+						await eda.sch_PrimitiveComponent.modify(item.primitiveId, { designator: prefix + '?' });
+					}
+
+					undoPages.push({ uuid: pageUuid, name: pageData.name, mappings: undoMappings });
+					log(t('Unassigned ${1} conflicts on page ${2}', pageData.items.length, pageData.name), 'info');
+				}
+
+				if (originalTabId) {
+					await eda.dmt_EditorControl.activateDocument(originalTabId);
+				}
+			}
+
+			// --- Core: compute clusters (read-only) ---
+			async function computeClusters() {
+				var components = await eda.sch_PrimitiveComponent.getAll('part', false);
+				if (!components || components.length === 0)
+					return { validComponents: [], sortedClusters: [], clusterCount: 0 };
+
+				var validComponents = components.filter(function(c) {
+					var designator = c.getState_Designator();
+					return designator && getDesignatorPrefix(designator).length > 0;
+				});
+				if (validComponents.length === 0)
+					return { validComponents: [], sortedClusters: [], clusterCount: 0 };
+
+				var wires = await eda.sch_PrimitiveWire.getAll();
+				var netFlags = await eda.sch_PrimitiveComponent.getAll('netflag', false);
+
+				var powerNets = new Set();
+				if (netFlags) {
+					for (var i = 0; i < netFlags.length; i++) {
+						var net = netFlags[i].getState_Net();
+						if (net) powerNets.add(net);
+					}
+				}
+
+				var pointToNets = buildPointToNetMap(wires, powerNets);
+				var compMap = new Map();
+				for (var i = 0; i < validComponents.length; i++) {
+					compMap.set(validComponents[i].getState_PrimitiveId(), validComponents[i]);
+				}
+
+				var compNets = await buildComponentNetMap(validComponents, pointToNets);
+				var clusters = findClusters(validComponents, compNets);
+				var sortedClusters = sortClusters(clusters, compMap);
+
+				return { validComponents: validComponents, sortedClusters: sortedClusters, clusterCount: sortedClusters.length };
+			}
+
+			// --- Core: reannotate page (read + write) ---
+			async function reannotatePage(prefixCounters, pageName, lockedDesignators, options) {
+				options = options || {};
+				var numberingMode = options.numberingMode || 'continuous';
+				var pageNum = options.pageNum || 1;
+				var blockStartNum = options.blockStartNum || 1;
+				var defaultStartNum = options.defaultStartNum || 1;
+				var existingHandling = options.existingHandling || 'clear';
+				var otherUsedSet = options.otherUsedSet || null;
+
+				var data = await computeClusters();
+				if (data.sortedClusters.length === 0)
+					return { modified: 0, clusters: 0, components: 0, changes: [], undoData: {}, nextBlockNum: blockStartNum };
+
+				var validComponents = data.validComponents;
+				var sortedClusters = data.sortedClusters;
+
+				var undoData = {};
+				for (var i = 0; i < validComponents.length; i++) {
+					undoData[validComponents[i].getState_PrimitiveId()] = validComponents[i].getState_Designator();
+				}
+
+				var modified = 0;
+				var changes = [];
+				var blockCounter = blockStartNum;
+				var clusterCounters = {};
+
+				for (var ci = 0; ci < sortedClusters.length; ci++) {
+					var cluster = sortedClusters[ci];
+					cluster.comps.sort(function(a, b) {
+						var prefixA = getDesignatorPrefix(a.getState_Designator());
+						var prefixB = getDesignatorPrefix(b.getState_Designator());
+						var isIcA = isIcPrefix(prefixA);
+						var isIcB = isIcPrefix(prefixB);
+						if (isIcA && !isIcB) return -1;
+						if (!isIcA && isIcB) return 1;
+						var ay = a.getState_Y(), by = b.getState_Y();
+						if (ay !== by) return by - ay;
+						return a.getState_X() - b.getState_X();
+					});
+
+					if (numberingMode === 'perblock') clusterCounters = {};
+
+					for (var di = 0; di < cluster.comps.length; di++) {
+						var comp = cluster.comps[di];
+						var oldDesignator = comp.getState_Designator();
+						var prefix = getDesignatorPrefix(oldDesignator);
+						if (!prefix) continue;
+
+						// Lock check
+						if (lockedDesignators && lockedDesignators.has(oldDesignator.toUpperCase())) {
+							if (numberingMode === 'continuous') {
+								var lockedNum = parseInt(oldDesignator.substring(prefix.length), 10);
+								if (!isNaN(lockedNum)) {
+									if (!(prefix in prefixCounters)) prefixCounters[prefix] = lockedNum + 1;
+									else prefixCounters[prefix] = Math.max(prefixCounters[prefix], lockedNum + 1);
+								}
+							}
+							changes.push({ primitiveId: comp.getState_PrimitiveId(), oldDesignator: oldDesignator, newDesignator: oldDesignator, locked: true });
+							continue;
+						}
+
+						var counters = (numberingMode === 'perblock') ? clusterCounters : prefixCounters;
+						if (!(prefix in counters)) counters[prefix] = defaultStartNum;
+
+						var newDesignator;
+						if (numberingMode === 'perblock') {
+							var candidate = prefix + blockCounter + String(counters[prefix]).padStart(2, '0');
+							if (existingHandling === 'skip' && otherUsedSet) {
+								while (otherUsedSet.has(candidate.toUpperCase())) {
+									counters[prefix]++;
+									candidate = prefix + blockCounter + String(counters[prefix]).padStart(2, '0');
+								}
+							}
+							newDesignator = candidate;
+						} else if (numberingMode === 'perpage') {
+							var candidate = prefix + pageNum + String(counters[prefix]).padStart(2, '0');
+							if (existingHandling === 'skip' && otherUsedSet) {
+								while (otherUsedSet.has(candidate.toUpperCase())) {
+									counters[prefix]++;
+									candidate = prefix + pageNum + String(counters[prefix]).padStart(2, '0');
+								}
+							}
+							newDesignator = candidate;
+						} else {
+							var candidate = prefix + counters[prefix];
+							if (existingHandling === 'skip' && otherUsedSet) {
+								while (otherUsedSet.has(candidate.toUpperCase())) {
+									counters[prefix]++;
+									candidate = prefix + counters[prefix];
+								}
+							}
+							newDesignator = candidate;
+						}
+						counters[prefix]++;
+						await eda.sch_PrimitiveComponent.modify(comp.getState_PrimitiveId(), { designator: newDesignator });
+						modified++;
+						changes.push({ primitiveId: comp.getState_PrimitiveId(), oldDesignator: oldDesignator, newDesignator: newDesignator, locked: false });
+					}
+
+					if (numberingMode === 'perblock') blockCounter++;
+				}
+
+				return { modified: modified, clusters: sortedClusters.length, components: validComponents.length, changes: changes, undoData: undoData, nextBlockNum: blockCounter };
+			}
+
+			// --- Diff report ---
+			function displayDiffReport(allChanges) {
+				var changed = allChanges.filter(function(c) { return !c.locked && c.oldDesignator !== c.newDesignator; });
+				if (changed.length === 0) { log(t('No designator changes'), 'info'); return; }
+
+				log(t('--- Designator Change Report (${1} items) ---', changed.length), 'diff');
+				for (var i = 0; i < changed.length; i++) {
+					log(changed[i].oldDesignator + ' \u2192 ' + changed[i].newDesignator, 'diff');
+				}
+			}
+
+			// --- Undo: save per-page snapshot ---
+			async function saveUndoSnapshot(undoPages) {
+				var data = { pages: undoPages };
+				await eda.sys_Storage.setExtensionUserConfig('reflow-undo', JSON.stringify(data));
+				document.getElementById('undoBtn').disabled = false;
+				var totalComps = 0;
+				for (var i = 0; i < undoPages.length; i++) {
+					totalComps += Object.keys(undoPages[i].mappings).length;
+				}
+				log(t('Undo snapshot saved (${1} components, ${2} pages)', totalComps, undoPages.length), 'info');
+			}
+
+			async function performUndo() {
+				if (isRunning) return;
+				isRunning = true;
+				setButtonsDisabled(true);
+
+				try {
+					var json = await eda.sys_Storage.getExtensionUserConfig('reflow-undo');
+					if (!json) { log(t('No undo data available'), 'warning'); return; }
+
+					var undoData = JSON.parse(json);
+					var undoPages = undoData.pages;
+					if (!undoPages || undoPages.length === 0) { log(t('Undo data is empty'), 'warning'); return; }
+
+					var totalComps = 0;
+					for (var i = 0; i < undoPages.length; i++) {
+						totalComps += Object.keys(undoPages[i].mappings).length;
+					}
+
+					log(t('Starting undo for ${1} components...', totalComps), 'info');
+					setStatus(t('Undoing...'), 'running');
+					var progressSection = document.getElementById('progressSection');
+					progressSection.classList.add('visible');
+
+					var currentDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+					var originalTabId = currentDoc ? currentDoc.tabId : null;
+					var restored = 0;
+
+					for (var pi = 0; pi < undoPages.length; pi++) {
+						var page = undoPages[pi];
+						var mappings = page.mappings;
+						var keys = Object.keys(mappings);
+						if (keys.length === 0) continue;
+
+						var tabId = await eda.dmt_EditorControl.openDocument(page.uuid);
+						if (!tabId) {
+							log(t('Undo: Cannot open page ${1}', page.name || page.uuid), 'warning');
+							continue;
+						}
+
+						log(t('Undo page: ${1} (${2} components)', page.name || page.uuid, keys.length), 'info');
+
+						for (var i = 0; i < keys.length; i++) {
+							var primitiveId = keys[i];
+							var oldDesignator = mappings[primitiveId];
+							await eda.sch_PrimitiveComponent.modify(primitiveId, { designator: oldDesignator });
+							restored++;
+						}
+
+						setProgress(pi + 1, undoPages.length);
+					}
+
+					if (originalTabId) {
+						await eda.dmt_EditorControl.activateDocument(originalTabId);
+					}
+
+					await eda.sys_Storage.deleteExtensionUserConfig('reflow-undo');
+					document.getElementById('undoBtn').disabled = true;
+
+					setProgressDone();
+					setStatus(t('Undo complete! ${1} components restored', restored), 'done');
+					log(t('Undo complete! ${1} components restored.', restored), 'success');
+				} catch (err) {
+					setStatus(t('Undo failed: ${1}', err.message||err), 'error');
+					setProgressError();
+					log(t('Undo failed: ${1}', err.message||err), 'error');
+				} finally {
+					isRunning = false;
+					setButtonsDisabled(false);
+				}
+			}
+
+			// --- Main: Start Reannotate ---
+			async function startReannotate() {
+				if (isRunning) return;
+				isRunning = true;
+				setButtonsDisabled(true);
+
+				var progressSection = document.getElementById('progressSection');
+				progressSection.classList.add('visible');
+
+				try {
+					var scope = getScope();
+					var numberingMode = getNumberingMode();
+					var startingNumberMode = getStartingNumberMode();
+					var customStartNum = getCustomStartNumber();
+					var existingHandling = getExistingHandling();
+					var lockedDesignators = getLockedDesignators();
+
+					log(t('Starting re-annotation...'), 'info');
+					setStatus(t('Checking document...'), 'running');
+					updateStats('-', '-', '-');
+
+					if (lockedDesignators.size > 0) {
+						log(t('Locked: ${1}', Array.from(lockedDesignators).join(', ')), 'info');
+					}
+
+					var pageList = await buildPageList(scope);
+					if (!pageList) {
+						setStatus(t('Error: Please open a schematic page'), 'error');
+						setProgressError();
+						log(t('Not a schematic page or no pages found'), 'error');
+						return;
+					}
+
+					var pages = pageList.pages;
+					var originalTabId = pageList.originalTabId;
+					var skipOpenForFirst = pageList.skipOpenForFirst;
+
+					log(scope === 'current' ? t('Scope: Current page') : t('Scope: All pages (${1})', pages.length), 'info');
+					if (numberingMode === 'continuous') log(t('Mode: Continuous'), 'info');
+					else if (numberingMode === 'perpage') log(t('Mode: Per-page'), 'info');
+					else log(t('Mode: Per-block'), 'info');
+					log(startingNumberMode === 'auto' ? t('Starting number: Auto') : t('Starting number: ${1}', customStartNum), 'info');
+					if (scope === 'current') {
+						log(existingHandling === 'clear' ? t('Existing handling: Clear All')
+							: existingHandling === 'overwrite' ? t('Existing handling: Overwrite Existing')
+							: t('Existing handling: Skip Existing'), 'info');
+					}
+
+					// Scan other pages if needed
+					var scanResult = null;
+					var needScan = (scope === 'current')
+						&& ((numberingMode === 'continuous' && startingNumberMode === 'auto') || existingHandling !== 'clear');
+					if (needScan) {
+						setStatus(t('Scanning other pages...'), 'running');
+						log(t('Scanning other pages...'), 'info');
+						var currentDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+						scanResult = await scanOtherPages(currentDoc.uuid);
+
+						if (startingNumberMode === 'auto' && Object.keys(scanResult.maxByPrefix).length > 0) {
+							var maxInfo = Object.keys(scanResult.maxByPrefix).map(function(p) {
+								return p + scanResult.maxByPrefix[p];
+							}).join(', ');
+							log(t('Max designators on other pages: ${1}', maxInfo), 'info');
+						}
+					}
+
+					// Initialize prefixCounters
+					var prefixCounters = {};
+					if (scope === 'current' && numberingMode === 'continuous' && startingNumberMode === 'auto' && scanResult) {
+						for (var prefix in scanResult.maxByPrefix) {
+							prefixCounters[prefix] = scanResult.maxByPrefix[prefix] + 1;
+						}
+					}
+					var blockCounter = 1;
+
+					var defaultStartNum = (startingNumberMode === 'custom') ? customStartNum : 1;
+					var totalModified = 0;
+					var totalClusters = 0;
+					var allChanges = [];
+					var undoPages = [];
+
+					for (var pageIdx = 0; pageIdx < pages.length; pageIdx++) {
+						var page = pages[pageIdx];
+						var pageName = page.name || t('Page ${1}', pageIdx + 1);
+						setStatus(t('Processing: ${1}', pageName + ' (' + (pageIdx+1) + '/' + pages.length + ')'), 'running');
+						setProgress(pageIdx, pages.length);
+						updateStats((pageIdx+1) + '/' + pages.length, '-', '-');
+
+						if (numberingMode === 'perpage') {
+							prefixCounters = {};
+						}
+
+						var pageNum = pageIdx + 1;
+
+						if (skipOpenForFirst && pageIdx === 0) {
+							log(t('Processing current page: ${1}', pageName), 'info');
+						} else {
+							log(t('Opening page: ${1}', pageName), 'info');
+							var tabId = await eda.dmt_EditorControl.openDocument(page.uuid);
+							if (!tabId) { log(t('Cannot open page: ${1}', pageName), 'warning'); continue; }
+						}
+
+						var reannotateOptions = {
+							numberingMode: numberingMode,
+							pageNum: pageNum,
+							blockStartNum: blockCounter,
+							defaultStartNum: defaultStartNum,
+							existingHandling: existingHandling,
+							otherUsedSet: (scanResult && existingHandling !== 'clear') ? scanResult.otherUsedSet : null
+						};
+
+						var result = await reannotatePage(prefixCounters, pageName, lockedDesignators, reannotateOptions);
+						if (numberingMode === 'perblock') blockCounter = result.nextBlockNum;
+						totalModified += result.modified;
+						totalClusters += result.clusters;
+						updateStats((pageIdx+1) + '/' + pages.length, result.components, totalClusters);
+						allChanges = allChanges.concat(result.changes);
+
+						undoPages.push({ uuid: page.uuid, name: pageName, mappings: result.undoData });
+
+						log(t('${1}: ${2} updated, ${3} clusters', pageName, result.modified, result.clusters), 'success');
+
+						// Handle overwrite conflicts after current page
+						if (scope === 'current' && existingHandling === 'overwrite' && scanResult) {
+							setStatus(t('Resolving designator conflicts...'), 'running');
+							await handleOverwriteConflicts(result.changes, scanResult, undoPages);
+						}
+					}
+
+					await saveUndoSnapshot(undoPages);
+
+					if (!skipOpenForFirst && originalTabId) {
+						await eda.dmt_EditorControl.activateDocument(originalTabId);
+					}
+
+					setProgressDone();
+					setStatus(t('Complete! ${1} components updated', totalModified), 'done');
+					log(t('Re-annotation complete! ${1} components updated', totalModified), 'success');
+
+					displayDiffReport(allChanges);
+
+					eda.sys_Message.showToastMessage(t('Re-annotation complete! ${1} components updated.', totalModified));
+
+				} catch (err) {
+					setStatus(t('Error: ${1}', err.message||err), 'error');
+					setProgressError();
+					log(t('An error occurred: ${1}', err.message||err), 'error');
+				} finally {
+					isRunning = false;
+					setButtonsDisabled(false);
+				}
+			}
+
+			// --- Shared computation functions ---
+			function buildPointToNetMap(wires, powerNets) {
+				var pointToNets = new Map();
+				if (!wires) return pointToNets;
+				for (var i = 0; i < wires.length; i++) {
+					var wire = wires[i];
+					var net = wire.getState_Net();
+					if (!net || powerNets.has(net)) continue;
+					var line = wire.getState_Line();
+					if (!line || line.length < 2) continue;
+					var points = extractWirePoints(line);
+					for (var j = 0; j < points.length; j++) {
+						var key = Math.round(points[j][0]) + ',' + Math.round(points[j][1]);
+						if (!pointToNets.has(key)) pointToNets.set(key, new Set());
+						pointToNets.get(key).add(net);
+					}
+				}
+				return pointToNets;
+			}
+
+			async function buildComponentNetMap(components, pointToNets) {
+				var compNets = new Map();
+				for (var i = 0; i < components.length; i++) {
+					var comp = components[i];
+					var compId = comp.getState_PrimitiveId();
+					var compX = comp.getState_X();
+					var compY = comp.getState_Y();
+					var pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(compId);
+					var nets = new Set();
+					if (pins) {
+						for (var j = 0; j < pins.length; j++) {
+							var px = pins[j].getState_X();
+							var py = pins[j].getState_Y();
+							var keyAbs = Math.round(px) + ',' + Math.round(py);
+							if (pointToNets.has(keyAbs)) {
+								pointToNets.get(keyAbs).forEach(function(net) { nets.add(net); });
+							}
+							var keyRel = Math.round(px + compX) + ',' + Math.round(py + compY);
+							if (keyRel !== keyAbs && pointToNets.has(keyRel)) {
+								pointToNets.get(keyRel).forEach(function(net) { nets.add(net); });
+							}
+						}
+					}
+					compNets.set(compId, nets);
+				}
+				return compNets;
+			}
+
+			function findClusters(components, compNets) {
+				var compIds = components.map(function(c) { return c.getState_PrimitiveId(); });
+				var uf = new UnionFind(compIds);
+				var netToComps = new Map();
+				compNets.forEach(function(nets, compId) {
+					nets.forEach(function(net) {
+						if (!netToComps.has(net)) netToComps.set(net, []);
+						netToComps.get(net).push(compId);
+					});
+				});
+				netToComps.forEach(function(netComps) {
+					for (var i = 1; i < netComps.length; i++) {
+						uf.union(netComps[0], netComps[i]);
+					}
+				});
+				return uf.getClusters();
+			}
+
+			function sortClusters(clusterMap, compMap) {
+				var clusters = [];
+				clusterMap.forEach(function(compIds) {
+					var comps = compIds.map(function(id) { return compMap.get(id); }).filter(Boolean);
+					if (comps.length === 0) return;
+					var cx = comps.reduce(function(sum, c) { return sum + c.getState_X(); }, 0) / comps.length;
+					var cy = comps.reduce(function(sum, c) { return sum + c.getState_Y(); }, 0) / comps.length;
+					clusters.push({ comps: comps, cx: cx, cy: cy });
+				});
+				if (clusters.length === 0) return clusters;
+
+				clusters.sort(function(a, b) { return b.cy - a.cy; });
+
+				var yGaps = [];
+				for (var i = 1; i < clusters.length; i++) {
+					yGaps.push(Math.abs(clusters[i].cy - clusters[i-1].cy));
+				}
+				var rowThreshold = 200;
+				if (yGaps.length > 0) {
+					var sortedGaps = yGaps.slice().sort(function(a,b) { return a-b; });
+					var medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+					rowThreshold = Math.max(200, medianGap * 1.5);
+				}
+
+				var rows = [];
+				for (var i = 0; i < clusters.length; i++) {
+					var placed = false;
+					for (var r = 0; r < rows.length; r++) {
+						if (Math.abs(clusters[i].cy - rows[r].refY) < rowThreshold) {
+							rows[r].items.push(clusters[i]);
+							placed = true; break;
+						}
+					}
+					if (!placed) rows.push({ refY: clusters[i].cy, items: [clusters[i]] });
+				}
+
+				rows.sort(function(a, b) { return b.refY - a.refY; });
+				var result = [];
+				for (var r = 0; r < rows.length; r++) {
+					rows[r].items.sort(function(a, b) { return a.cx - b.cx; });
+					for (var j = 0; j < rows[r].items.length; j++) {
+						result.push(rows[r].items[j]);
+					}
+				}
+				return result;
+			}
+
+			function extractWirePoints(line) {
+				var points = [];
+				if (!line || line.length === 0) return points;
+				if (Array.isArray(line[0])) {
+					for (var i = 0; i < line.length; i++) points.push([line[i][0], line[i][1]]);
+				} else {
+					for (var i = 0; i < line.length - 1; i += 2) points.push([line[i], line[i+1]]);
+				}
+				return points;
+			}
+
+			function getDesignatorPrefix(designator) {
+				if (!designator) return '';
+				var match = designator.match(/^([a-z]+)/i);
+				return match ? match[1] : '';
+			}
+
+			function isIcPrefix(prefix) {
+				return ['U','IC','MCU','CPU','FPGA','MPU','SOC','DSP'].indexOf(prefix.toUpperCase()) !== -1;
+			}
+
+			// --- Union-Find ---
+			function UnionFind(ids) {
+				this.parent = new Map();
+				this.rank = new Map();
+				for (var i = 0; i < ids.length; i++) {
+					this.parent.set(ids[i], ids[i]);
+					this.rank.set(ids[i], 0);
+				}
+			}
+			UnionFind.prototype.find = function(x) {
+				if (this.parent.get(x) !== x) this.parent.set(x, this.find(this.parent.get(x)));
+				return this.parent.get(x);
+			};
+			UnionFind.prototype.union = function(x, y) {
+				var rootX = this.find(x), rootY = this.find(y);
+				if (rootX === rootY) return;
+				var rankX = this.rank.get(rootX), rankY = this.rank.get(rootY);
+				if (rankX < rankY) { this.parent.set(rootX, rootY); }
+				else if (rankX > rankY) { this.parent.set(rootY, rootX); }
+				else { this.parent.set(rootY, rootX); this.rank.set(rootX, rankX + 1); }
+			};
+			UnionFind.prototype.getClusters = function() {
+				var clusters = new Map();
+				var self = this;
+				this.parent.forEach(function(_, id) {
+					var root = self.find(id);
+					if (!clusters.has(root)) clusters.set(root, []);
+					clusters.get(root).push(id);
+				});
+				return clusters;
+			};
+		</script>
+	</body>
+</html>

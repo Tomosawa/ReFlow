@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: false
+  simple-git-hooks: false
+minimumReleaseAgeExclude:
+  - '@jlceda/pro-api-types@0.2.70'

@@ -1,0 +1,79 @@
+{
+	"name": "reflow",
+	"uuid": "00d9c782a2d54efd9c989c2d4916e5ac",
+	"displayName": "ReFlow 智能位号",
+	"description": "读懂电路逻辑，按图块智能编号。自动识别相连接的对应电路图功能的模块，确保每个图块内的位号（R/C/U）连续排列，让设计井然有序。",
+	"version": "1.0.0",
+	"publisher": "",
+	"engines": {
+		"eda": "^3.0.0"
+	},
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "extension-store",
+		"url": ""
+	},
+	"categories": "Other",
+	"keywords": [
+		"Tool"
+	],
+	"images": {
+		"logo": "./images/logo.png"
+	},
+	"homepage": "",
+	"bugs": "",
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+			"home": [
+				{
+					"id": "menuId",
+					"title": "ReFlow 智能位号",
+					"menuItems": [
+						{
+							"id": "Reannotate",
+							"title": "Re-annotate...",
+							"registerFn": "reannotate"
+						},
+						{
+							"id": "About",
+							"title": "About...",
+							"registerFn": "about"
+						}
+					]
+				}
+			],
+			"sch": [
+				{
+					"id": "menuId",
+					"title": "ReFlow 智能位号",
+					"menuItems": [
+						{
+							"id": "Reannotate",
+							"title": "Re-annotate...",
+							"registerFn": "reannotate"
+						},
+						{
+							"id": "About",
+							"title": "About...",
+							"registerFn": "about"
+						}
+					]
+				}
+			],
+			"pcb": [
+				{
+					"id": "menuId",
+					"title": "ReFlow 智能位号",
+					"menuItems": [
+						{
+							"id": "About",
+							"title": "About...",
+							"registerFn": "about"
+						}
+					]
+				}
+			]
+		}
+}
