@@ -1,27 +1,30 @@
 {
 	"name": "reflow",
-	"uuid": "00d9c782a2d54efd9c989c2d4916e5ac",
+	"uuid": "3045b488b8104f4fa7d5e01da164660f",
 	"displayName": "ReFlow 智能位号",
 	"description": "读懂电路逻辑，按图块智能编号。自动识别相连接的对应电路图功能的模块，确保每个图块内的位号（R/C/U）连续排列，让设计井然有序。",
 	"version": "1.0.0",
-	"publisher": "",
+	"publisher": "Tomosawa",
 	"engines": {
 		"eda": "^3.0.0"
 	},
 	"license": "Apache-2.0",
 	"repository": {
-		"type": "extension-store",
-		"url": ""
+		"type": "github",
+		"url": "https://github.com/Tomosawa/ReFlow"
 	},
-	"categories": "Other",
+	"categories": "Schematic",
 	"keywords": [
-		"Tool"
+		"Tool",
+		"ReFlow",
+		"Re-annotate",
+		"智能位号"
 	],
 	"images": {
 		"logo": "./images/logo.png"
 	},
-	"homepage": "",
-	"bugs": "",
+	"homepage": "https://github.com/Tomosawa/ReFlow",
+	"bugs": "https://github.com/Tomosawa/ReFlow/issues",
 	"activationEvents": {},
 	"entry": "./dist/index",
 	"dependentExtensions": {},

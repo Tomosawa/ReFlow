@@ -4,13 +4,17 @@
 
 Intelligent schematic reference designator reassignment extension for JLCEDA / EasyEDA Pro
 
-<img src="./images/ScreenShot.png" alt="ReFlow Smart Designator Screenshot" width="480" />
+![Screenshot](./images/ScreenShot.png)
 
 ## Overview
 
 **ReFlow Smart Designator** understands your circuit logic. It automatically identifies electrically connected components as functional modules (clusters) and assigns consecutive reference designators within each cluster, keeping your schematic organized and readable.
 
 Traditional sequential numbering scatters related components across the designator range. ReFlow uses a Union-Find algorithm to analyze wire connectivity, ensuring that components belonging to the same functional block receive consecutive designators (R/C/U, etc.), dramatically improving schematic readability and maintainability.
+
+## Feature Demos
+
+![Feature Demos](./images/preview1.gif)
 
 ## Features
 

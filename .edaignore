@@ -1,6 +1,7 @@
 /.git/
 /.husky/
 /.vscode/
+/.trae/
 /build/
 /config/
 /coverage/
@@ -9,10 +10,15 @@
 /.editorconfig
 /.gitattributes
 /.gitignore
+/.gitmodules
 /.npmrc
 /eslint.config.mjs
 /package-lock.json
 /package.json
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
 /tsconfig.json
+*.eext
+.DS_Store
 .eslintcache
 debug.log

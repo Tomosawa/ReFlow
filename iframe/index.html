@@ -259,11 +259,12 @@
 				var fill = document.getElementById('progressFill');
 				fill.className = 'progress-fill error';
 			}
-			function updateStats(pages, components, clusters) {
-				document.getElementById('statPages').textContent = t('Pages: ${1}', pages);
-				document.getElementById('statComponents').textContent = t('Components: ${1}', components);
-				document.getElementById('statClusters').textContent = t('Clusters: ${1}', clusters);
-			}
+			function updateStats(pages, components, clusters, isBlockMode) {
+					document.getElementById('statPages').textContent = t('Pages: ${1}', pages);
+					document.getElementById('statComponents').textContent = t('Components: ${1}', components);
+					var clusterKey = isBlockMode ? 'Blocks: ${1}' : 'Clusters: ${1}';
+					document.getElementById('statClusters').textContent = t(clusterKey, clusters);
+				}
 			function closeWindow() { eda.sys_IFrame.closeIFrame('reannotate-iframe'); }
 
 			function setButtonsDisabled(disabled) {
@@ -483,7 +484,7 @@
 			}
 
 			// --- Core: compute clusters (read-only) ---
-			async function computeClusters() {
+			async function computeClusters(numberingMode) {
 				var components = await eda.sch_PrimitiveComponent.getAll('part', false);
 				if (!components || components.length === 0)
 					return { validComponents: [], sortedClusters: [], clusterCount: 0 };
@@ -506,15 +507,46 @@
 					}
 				}
 
-				var pointToNets = buildPointToNetMap(wires, powerNets);
-				var compMap = new Map();
-				for (var i = 0; i < validComponents.length; i++) {
-					compMap.set(validComponents[i].getState_PrimitiveId(), validComponents[i]);
-				}
+				var wireData = buildWireData(wires, powerNets, numberingMode === 'perblock');
+						log(t('Wires: ${1} signal endpoints, ${2} power endpoints, ${3} signal segments, ${4} power segments',
+							wireData.signalEndpoints.length, wireData.powerEndpoints.length,
+							wireData.signalSegs.length, wireData.powerSegs.length), 'info');
+						var compMap = new Map();
+						for (var i = 0; i < validComponents.length; i++) {
+							compMap.set(validComponents[i].getState_PrimitiveId(), validComponents[i]);
+						}
 
-				var compNets = await buildComponentNetMap(validComponents, pointToNets);
-				var clusters = findClusters(validComponents, compNets);
-				var sortedClusters = sortClusters(clusters, compMap);
+						var compNetMaps = await buildComponentNetMap(validComponents, wireData, numberingMode === 'perblock');
+							if (numberingMode === 'perblock') {
+									if (compNetMaps.stats.pinCoordLog && compNetMaps.stats.pinCoordLog.length > 0) {
+										log('[debug] 引脚坐标(前3): ' + compNetMaps.stats.pinCoordLog.join(' | '), 'info');
+									}
+									var physNetStats = new Map();
+								var compNetDetail = [];
+								compNetMaps.signal.forEach(function(nets, compId) {
+									nets.forEach(function(n) {
+										physNetStats.set(n, (physNetStats.get(n) || 0) + 1);
+									});
+								});
+								compMap.forEach(function(comp, id) {
+									var nets = compNetMaps.signal.get(id) || [];
+									if (nets.length > 0) {
+										compNetDetail.push(comp.getState_Designator() + '@(' + comp.getState_X().toFixed(0) + ',' + comp.getState_Y().toFixed(0) + ') -> ' + nets.join(','));
+									}
+								});
+								var physNetList = [];
+								physNetStats.forEach(function(cnt, n) { if (cnt > 1) physNetList.push(n + ':' + cnt); });
+								log('[debug] 物理网络(>1组件): ' + physNetList.join(', '), 'info');
+								log('[debug] 组件网络匹配: ' + compNetDetail.join(' | '), 'info');
+							}
+						var clusters = findClusters(validComponents, compNetMaps.signal, compNetMaps.power);
+					var sortedClusters = sortClusters(clusters, compMap);
+						if (numberingMode === 'perblock') {
+							for (var ci = 0; ci < sortedClusters.length; ci++) {
+								var names = sortedClusters[ci].comps.map(function(c) { return c.getState_Designator(); }).join(' ');
+								log('[debug] 图块' + (ci+1) + ' (' + sortedClusters[ci].cx.toFixed(0) + ',' + sortedClusters[ci].cy.toFixed(0) + '): ' + names, 'info');
+							}
+						}
 
 				return { validComponents: validComponents, sortedClusters: sortedClusters, clusterCount: sortedClusters.length };
 			}
@@ -529,14 +561,14 @@
 				var existingHandling = options.existingHandling || 'clear';
 				var otherUsedSet = options.otherUsedSet || null;
 
-				var data = await computeClusters();
+				var data = await computeClusters(numberingMode);
 				if (data.sortedClusters.length === 0)
 					return { modified: 0, clusters: 0, components: 0, changes: [], undoData: {}, nextBlockNum: blockStartNum };
 
 				var validComponents = data.validComponents;
-				var sortedClusters = data.sortedClusters;
+					var sortedClusters = data.sortedClusters;
 
-				var undoData = {};
+					var undoData = {};
 				for (var i = 0; i < validComponents.length; i++) {
 					undoData[validComponents[i].getState_PrimitiveId()] = validComponents[i].getState_Designator();
 				}
@@ -586,23 +618,23 @@
 
 						var newDesignator;
 						if (numberingMode === 'perblock') {
-							var candidate = prefix + blockCounter + String(counters[prefix]).padStart(2, '0');
-							if (existingHandling === 'skip' && otherUsedSet) {
-								while (otherUsedSet.has(candidate.toUpperCase())) {
-									counters[prefix]++;
-									candidate = prefix + blockCounter + String(counters[prefix]).padStart(2, '0');
+								var candidate = prefix + (blockCounter * 100 + counters[prefix]);
+								if (existingHandling === 'skip' && otherUsedSet) {
+									while (otherUsedSet.has(candidate.toUpperCase())) {
+										counters[prefix]++;
+										candidate = prefix + (blockCounter * 100 + counters[prefix]);
+									}
 								}
-							}
-							newDesignator = candidate;
-						} else if (numberingMode === 'perpage') {
-							var candidate = prefix + pageNum + String(counters[prefix]).padStart(2, '0');
-							if (existingHandling === 'skip' && otherUsedSet) {
-								while (otherUsedSet.has(candidate.toUpperCase())) {
-									counters[prefix]++;
-									candidate = prefix + pageNum + String(counters[prefix]).padStart(2, '0');
+								newDesignator = candidate;
+							} else if (numberingMode === 'perpage') {
+								var candidate = prefix + (pageNum * 100 + counters[prefix]);
+								if (existingHandling === 'skip' && otherUsedSet) {
+									while (otherUsedSet.has(candidate.toUpperCase())) {
+										counters[prefix]++;
+										candidate = prefix + (pageNum * 100 + counters[prefix]);
+									}
 								}
-							}
-							newDesignator = candidate;
+								newDesignator = candidate;
 						} else {
 							var candidate = prefix + counters[prefix];
 							if (existingHandling === 'skip' && otherUsedSet) {
@@ -834,12 +866,13 @@
 						if (numberingMode === 'perblock') blockCounter = result.nextBlockNum;
 						totalModified += result.modified;
 						totalClusters += result.clusters;
-						updateStats((pageIdx+1) + '/' + pages.length, result.components, totalClusters);
+						updateStats((pageIdx+1) + '/' + pages.length, result.components, totalClusters, numberingMode === 'perblock');
 						allChanges = allChanges.concat(result.changes);
 
 						undoPages.push({ uuid: page.uuid, name: pageName, mappings: result.undoData });
 
-						log(t('${1}: ${2} updated, ${3} clusters', pageName, result.modified, result.clusters), 'success');
+						var logKey = (numberingMode === 'perblock') ? '${1}: ${2} updated, ${3} blocks' : '${1}: ${2} updated, ${3} clusters';
+							log(t(logKey, pageName, result.modified, result.clusters), 'success');
 
 						// Handle overwrite conflicts after current page
 						if (scope === 'current' && existingHandling === 'overwrite' && scanResult) {
@@ -873,117 +906,273 @@
 			}
 
 			// --- Shared computation functions ---
-			function buildPointToNetMap(wires, powerNets) {
-				var pointToNets = new Map();
-				if (!wires) return pointToNets;
-				for (var i = 0; i < wires.length; i++) {
-					var wire = wires[i];
-					var net = wire.getState_Net();
-					if (!net || powerNets.has(net)) continue;
-					var line = wire.getState_Line();
-					if (!line || line.length < 2) continue;
-					var points = extractWirePoints(line);
-					for (var j = 0; j < points.length; j++) {
-						var key = Math.round(points[j][0]) + ',' + Math.round(points[j][1]);
-						if (!pointToNets.has(key)) pointToNets.set(key, new Set());
-						pointToNets.get(key).add(net);
-					}
-				}
-				return pointToNets;
-			}
+				function buildWireData(wires, powerNets, usePhysicalNets) {
+								var signalEndpoints = [];
+								var powerEndpoints = [];
+								var signalSegs = [];
+								var powerSegs = [];
+								if (!wires) return { signalEndpoints: signalEndpoints, powerEndpoints: powerEndpoints, signalSegs: signalSegs, powerSegs: powerSegs };
 
-			async function buildComponentNetMap(components, pointToNets) {
-				var compNets = new Map();
-				for (var i = 0; i < components.length; i++) {
-					var comp = components[i];
-					var compId = comp.getState_PrimitiveId();
-					var compX = comp.getState_X();
-					var compY = comp.getState_Y();
-					var pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(compId);
-					var nets = new Set();
-					if (pins) {
-						for (var j = 0; j < pins.length; j++) {
-							var px = pins[j].getState_X();
-							var py = pins[j].getState_Y();
-							var keyAbs = Math.round(px) + ',' + Math.round(py);
-							if (pointToNets.has(keyAbs)) {
-								pointToNets.get(keyAbs).forEach(function(net) { nets.add(net); });
+								if (!usePhysicalNets) {
+									for (var i = 0; i < wires.length; i++) {
+										var wire = wires[i];
+										var net = wire.getState_Net();
+										if (!net) continue;
+										var isPower = powerNets.has(net);
+										var line = wire.getState_Line();
+										if (!line || line.length < 2) continue;
+										var points = extractWirePoints(line);
+										var epList = isPower ? powerEndpoints : signalEndpoints;
+										var segList = isPower ? powerSegs : signalSegs;
+										epList.push({ x: points[0][0], y: points[0][1], net: net });
+										epList.push({ x: points[points.length-1][0], y: points[points.length-1][1], net: net });
+										for (var j = 1; j < points.length; j++) {
+											segList.push({ x1: points[j-1][0], y1: points[j-1][1], x2: points[j][0], y2: points[j][1], net: net });
+										}
+									}
+									return { signalEndpoints: signalEndpoints, powerEndpoints: powerEndpoints, signalSegs: signalSegs, powerSegs: powerSegs };
+								}
+
+								var rawEndpoints = [];
+								var rawSegs = [];
+								var wireIdx = 0;
+								for (var i = 0; i < wires.length; i++) {
+									var wire = wires[i];
+									var line = wire.getState_Line();
+									if (!line || line.length < 2) continue;
+									var net = '__WIRE_' + (wireIdx++) + '__';
+									var points = extractWirePoints(line);
+									for (var p = 0; p < points.length; p++) {
+										rawEndpoints.push({ x: points[p][0], y: points[p][1], net: net });
+									}
+									for (var j = 1; j < points.length; j++) {
+										rawSegs.push({ x1: points[j-1][0], y1: points[j-1][1], x2: points[j][0], y2: points[j][1], net: net });
+									}
+								}
+
+								var allNets = new Set();
+								for (var i = 0; i < rawEndpoints.length; i++) allNets.add(rawEndpoints[i].net);
+								var netIds = Array.from(allNets);
+								var netParent = new Map();
+								var netRank = new Map();
+								for (var i = 0; i < netIds.length; i++) {
+									netParent.set(netIds[i], netIds[i]);
+									netRank.set(netIds[i], 0);
+								}
+								function netFind(x) {
+									if (netParent.get(x) !== x) netParent.set(x, netFind(netParent.get(x)));
+									return netParent.get(x);
+								}
+								function netUnion(a, b) {
+									var ra = netFind(a), rb = netFind(b);
+									if (ra === rb) return;
+									var rra = netRank.get(ra), rrb = netRank.get(rb);
+									if (rra < rrb) netParent.set(ra, rb);
+									else if (rra > rrb) netParent.set(rb, ra);
+									else { netParent.set(rb, ra); netRank.set(ra, rra + 1); }
+								}
+
+								var SNAP = 25;
+								var SNAP2 = SNAP * SNAP;
+								for (var i = 0; i < rawEndpoints.length; i++) {
+									for (var j = i + 1; j < rawEndpoints.length; j++) {
+										if (rawEndpoints[i].net !== rawEndpoints[j].net) {
+											if (distSq(rawEndpoints[i].x, rawEndpoints[i].y, rawEndpoints[j].x, rawEndpoints[j].y) <= SNAP2) {
+												netUnion(rawEndpoints[i].net, rawEndpoints[j].net);
+											}
+										}
+									}
+								}
+
+								function resolveFinalNet(rawNet) {
+										return netFind(rawNet);
+									}
+
+									var physNetIdx = 0;
+									var physNetMap = new Map();
+									function toPhysNetId(root) {
+										if (!physNetMap.has(root)) physNetMap.set(root, '__PNET_' + (physNetIdx++) + '__');
+										return physNetMap.get(root);
+									}
+
+									for (var i = 0; i < rawEndpoints.length; i++) {
+										var ep = rawEndpoints[i];
+										var root = resolveFinalNet(ep.net);
+										var pid = toPhysNetId(root);
+										signalEndpoints.push({ x: ep.x, y: ep.y, net: pid });
+									}
+									for (var i = 0; i < rawSegs.length; i++) {
+										var sg = rawSegs[i];
+										var root = resolveFinalNet(sg.net);
+										var pid = toPhysNetId(root);
+										signalSegs.push({ x1: sg.x1, y1: sg.y1, x2: sg.x2, y2: sg.y2, net: pid });
+									}
+
+								return { signalEndpoints: signalEndpoints, powerEndpoints: powerEndpoints, signalSegs: signalSegs, powerSegs: powerSegs };
 							}
-							var keyRel = Math.round(px + compX) + ',' + Math.round(py + compY);
-							if (keyRel !== keyAbs && pointToNets.has(keyRel)) {
-								pointToNets.get(keyRel).forEach(function(net) { nets.add(net); });
-							}
+
+					function ptSegDistSq(px, py, x1, y1, x2, y2) {
+							var dx = x2 - x1, dy = y2 - y1;
+							var len2 = dx * dx + dy * dy;
+							if (len2 === 0) return (px-x1)*(px-x1) + (py-y1)*(py-y1);
+							var t = ((px-x1)*dx + (py-y1)*dy) / len2;
+							if (t < 0) t = 0; else if (t > 1) t = 1;
+							var projX = x1 + t * dx, projY = y1 + t * dy;
+							return (px-projX)*(px-projX) + (py-projY)*(py-projY);
 						}
-					}
-					compNets.set(compId, nets);
-				}
-				return compNets;
-			}
 
-			function findClusters(components, compNets) {
-				var compIds = components.map(function(c) { return c.getState_PrimitiveId(); });
-				var uf = new UnionFind(compIds);
-				var netToComps = new Map();
-				compNets.forEach(function(nets, compId) {
-					nets.forEach(function(net) {
-						if (!netToComps.has(net)) netToComps.set(net, []);
-						netToComps.get(net).push(compId);
-					});
-				});
-				netToComps.forEach(function(netComps) {
-					for (var i = 1; i < netComps.length; i++) {
-						uf.union(netComps[0], netComps[i]);
+					function distSq(ax, ay, bx, by) {
+							var dx = ax - bx, dy = ay - by;
+							return dx * dx + dy * dy;
+						}
+
+				async function buildComponentNetMap(components, wireData, usePhysicalNets) {
+								var compSignalNets = new Map();
+								var compPowerNets = new Map();
+								var SNAP_ENDPOINT = 25;
+								var SNAP_SEGMENT = 100;
+								var pinCoordLog = [];
+
+								var sigEps = wireData.signalEndpoints;
+								var powEps = wireData.powerEndpoints;
+								var sigSegs = wireData.signalSegs;
+								var powSegs = wireData.powerSegs;
+
+								for (var i = 0; i < components.length; i++) {
+									var comp = components[i];
+									var compId = comp.getState_PrimitiveId();
+									var compX = comp.getState_X();
+									var compY = comp.getState_Y();
+									var pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(compId);
+									var signalNets = new Set();
+									var powerNetSet = new Set();
+
+									if (!pins || pins.length === 0) {
+										compSignalNets.set(compId, signalNets);
+										compPowerNets.set(compId, powerNetSet);
+										continue;
+									}
+
+									if (usePhysicalNets && pinCoordLog.length < 3) {
+										var samplePin = pins[0];
+										pinCoordLog.push(comp.getState_Designator() + ' comp@(' + compX.toFixed(0) + ',' + compY.toFixed(0) + ') pin0@(' + samplePin.getState_X().toFixed(0) + ',' + samplePin.getState_Y().toFixed(0) + ') sum@(' + (samplePin.getState_X()+compX).toFixed(0) + ',' + (samplePin.getState_Y()+compY).toFixed(0) + ')');
+									}
+
+									for (var j = 0; j < pins.length; j++) {
+										var pinX = pins[j].getState_X();
+										var pinY = pins[j].getState_Y();
+
+										var absCoords = usePhysicalNets
+											? [{ x: pinX, y: pinY }]
+											: [{ x: pinX, y: pinY }, { x: pinX + compX, y: pinY + compY }];
+
+										for (var ci = 0; ci < absCoords.length; ci++) {
+											var cx = absCoords[ci].x;
+											var cy = absCoords[ci].y;
+
+											for (var e = 0; e < sigEps.length; e++) {
+												if (distSq(cx, cy, sigEps[e].x, sigEps[e].y) <= SNAP_ENDPOINT * SNAP_ENDPOINT) {
+													signalNets.add(sigEps[e].net);
+												}
+											}
+											for (var e = 0; e < powEps.length; e++) {
+												if (distSq(cx, cy, powEps[e].x, powEps[e].y) <= SNAP_ENDPOINT * SNAP_ENDPOINT) {
+													powerNetSet.add(powEps[e].net);
+												}
+											}
+											for (var s = 0; s < sigSegs.length; s++) {
+												var sg = sigSegs[s];
+												if (ptSegDistSq(cx, cy, sg.x1, sg.y1, sg.x2, sg.y2) < SNAP_SEGMENT) {
+													signalNets.add(sg.net);
+												}
+											}
+											for (var s = 0; s < powSegs.length; s++) {
+												var sg = powSegs[s];
+												if (ptSegDistSq(cx, cy, sg.x1, sg.y1, sg.x2, sg.y2) < SNAP_SEGMENT) {
+													powerNetSet.add(sg.net);
+												}
+											}
+										}
+									}
+									compSignalNets.set(compId, signalNets);
+									compPowerNets.set(compId, powerNetSet);
+								}
+								return { signal: compSignalNets, power: compPowerNets, stats: { totalComps: components.length, pinCoordLog: pinCoordLog } };
+							}
+
+			function findClusters(components, compSignalNets, compPowerNets) {
+						var compIds = components.map(function(c) { return c.getState_PrimitiveId(); });
+						var uf = new UnionFind(compIds);
+
+						var netToComps = new Map();
+						compSignalNets.forEach(function(nets, compId) {
+							nets.forEach(function(net) {
+								if (!netToComps.has(net)) netToComps.set(net, []);
+								netToComps.get(net).push(compId);
+							});
+						});
+						compPowerNets.forEach(function(nets, compId) {
+							nets.forEach(function(net) {
+								if (!netToComps.has(net)) netToComps.set(net, []);
+								netToComps.get(net).push(compId);
+							});
+						});
+						netToComps.forEach(function(netComps) {
+							for (var i = 1; i < netComps.length; i++) {
+								uf.union(netComps[0], netComps[i]);
+							}
+						});
+
+						return uf.getClusters();
 					}
-				});
-				return uf.getClusters();
-			}
 
 			function sortClusters(clusterMap, compMap) {
-				var clusters = [];
-				clusterMap.forEach(function(compIds) {
-					var comps = compIds.map(function(id) { return compMap.get(id); }).filter(Boolean);
-					if (comps.length === 0) return;
-					var cx = comps.reduce(function(sum, c) { return sum + c.getState_X(); }, 0) / comps.length;
-					var cy = comps.reduce(function(sum, c) { return sum + c.getState_Y(); }, 0) / comps.length;
-					clusters.push({ comps: comps, cx: cx, cy: cy });
-				});
-				if (clusters.length === 0) return clusters;
+						var clusters = [];
+						clusterMap.forEach(function(compIds) {
+							var comps = compIds.map(function(id) { return compMap.get(id); }).filter(Boolean);
+							if (comps.length === 0) return;
+							var topY = comps.reduce(function(max, c) { return Math.max(max, c.getState_Y()); }, -Infinity);
+							var leftX = comps.reduce(function(min, c) { return Math.min(min, c.getState_X()); }, Infinity);
+							clusters.push({ comps: comps, cx: leftX, cy: topY });
+						});
+						if (clusters.length === 0) return clusters;
 
-				clusters.sort(function(a, b) { return b.cy - a.cy; });
+						clusters.sort(function(a, b) { return b.cy - a.cy; });
 
-				var yGaps = [];
-				for (var i = 1; i < clusters.length; i++) {
-					yGaps.push(Math.abs(clusters[i].cy - clusters[i-1].cy));
-				}
-				var rowThreshold = 200;
-				if (yGaps.length > 0) {
-					var sortedGaps = yGaps.slice().sort(function(a,b) { return a-b; });
-					var medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
-					rowThreshold = Math.max(200, medianGap * 1.5);
-				}
-
-				var rows = [];
-				for (var i = 0; i < clusters.length; i++) {
-					var placed = false;
-					for (var r = 0; r < rows.length; r++) {
-						if (Math.abs(clusters[i].cy - rows[r].refY) < rowThreshold) {
-							rows[r].items.push(clusters[i]);
-							placed = true; break;
+						var yGaps = [];
+						for (var i = 1; i < clusters.length; i++) {
+							yGaps.push(Math.abs(clusters[i].cy - clusters[i-1].cy));
 						}
-					}
-					if (!placed) rows.push({ refY: clusters[i].cy, items: [clusters[i]] });
-				}
+						var rowThreshold = 200;
+						if (yGaps.length > 0) {
+							var sortedGaps = yGaps.slice().sort(function(a,b) { return a-b; });
+							var medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+							rowThreshold = Math.max(200, medianGap * 1.5);
+						}
 
-				rows.sort(function(a, b) { return b.refY - a.refY; });
-				var result = [];
-				for (var r = 0; r < rows.length; r++) {
-					rows[r].items.sort(function(a, b) { return a.cx - b.cx; });
-					for (var j = 0; j < rows[r].items.length; j++) {
-						result.push(rows[r].items[j]);
+						var rows = [];
+						for (var i = 0; i < clusters.length; i++) {
+							var placed = false;
+							for (var r = 0; r < rows.length; r++) {
+								if (Math.abs(clusters[i].cy - rows[r].refY) < rowThreshold) {
+									rows[r].items.push(clusters[i]);
+									placed = true; break;
+								}
+							}
+							if (!placed) rows.push({ refY: clusters[i].cy, items: [clusters[i]] });
+						}
+
+						rows.sort(function(a, b) { return b.refY - a.refY; });
+						var result = [];
+						for (var r = 0; r < rows.length; r++) {
+							rows[r].items.sort(function(a, b) { return a.cx - b.cx; });
+							for (var j = 0; j < rows[r].items.length; j++) {
+								result.push(rows[r].items[j]);
+							}
+						}
+						return result;
 					}
-				}
-				return result;
-			}
+
 
 			function extractWirePoints(line) {
 				var points = [];
