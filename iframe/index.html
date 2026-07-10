@@ -471,7 +471,12 @@
 						var item = pageData.items[i];
 						var prefix = getDesignatorPrefix(item.designator);
 						undoMappings[item.primitiveId] = item.designator;
-						await eda.sch_PrimitiveComponent.modify(item.primitiveId, { designator: prefix + '?' });
+							var conflictComp = await eda.sch_PrimitiveComponent.get([item.primitiveId]);
+							if (conflictComp) {
+								var ac = conflictComp.toAsync();
+								ac.setState_Designator(prefix + '?');
+								ac.done();
+							}
 					}
 
 					undoPages.push({ uuid: pageUuid, name: pageData.name, mappings: undoMappings });
@@ -646,9 +651,18 @@
 							newDesignator = candidate;
 						}
 						counters[prefix]++;
-						await eda.sch_PrimitiveComponent.modify(comp.getState_PrimitiveId(), { designator: newDesignator });
-						modified++;
-						changes.push({ primitiveId: comp.getState_PrimitiveId(), oldDesignator: oldDesignator, newDesignator: newDesignator, locked: false });
+								var beforeSupplier = comp.getState_Supplier();
+								var beforeOther = comp.getState_OtherProperty();
+								var asyncComp = comp.toAsync();
+								asyncComp.setState_Designator(newDesignator);
+								asyncComp.done();
+								var afterSupplier = comp.getState_Supplier();
+								var afterOther = comp.getState_OtherProperty();
+								if (beforeSupplier !== afterSupplier || JSON.stringify(beforeOther) !== JSON.stringify(afterOther)) {
+									log('[warn] 属性变化 ' + oldDesignator + '->' + newDesignator + ' supplier:' + beforeSupplier + '->' + afterSupplier, 'warning');
+								}
+							modified++;
+							changes.push({ primitiveId: comp.getState_PrimitiveId(), oldDesignator: oldDesignator, newDesignator: newDesignator, locked: false });
 					}
 
 					if (numberingMode === 'perblock') blockCounter++;
@@ -722,11 +736,16 @@
 						log(t('Undo page: ${1} (${2} components)', page.name || page.uuid, keys.length), 'info');
 
 						for (var i = 0; i < keys.length; i++) {
-							var primitiveId = keys[i];
-							var oldDesignator = mappings[primitiveId];
-							await eda.sch_PrimitiveComponent.modify(primitiveId, { designator: oldDesignator });
-							restored++;
-						}
+								var primitiveId = keys[i];
+								var oldDesignator = mappings[primitiveId];
+								var undoComp = await eda.sch_PrimitiveComponent.get([primitiveId]);
+								if (undoComp) {
+									var ac = undoComp.toAsync();
+									ac.setState_Designator(oldDesignator);
+									ac.done();
+								}
+								restored++;
+							}
 
 						setProgress(pi + 1, undoPages.length);
 					}

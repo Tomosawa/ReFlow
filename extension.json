@@ -3,7 +3,7 @@
 	"uuid": "3045b488b8104f4fa7d5e01da164660f",
 	"displayName": "ReFlow 智能位号",
 	"description": "读懂电路逻辑，按图块智能编号。自动识别相连接的对应电路图功能的模块，确保每个图块内的位号（R/C/U）连续排列，让设计井然有序。",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"publisher": "Tomosawa",
 	"engines": {
 		"eda": "^3.0.0"
